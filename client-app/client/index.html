@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en" ng-app>
+
+<head>
+  <title>Bem vindo!</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="/css/bootstrap.min.css">
+  <link rel="stylesheet" href="/css/bootstrap-responsive.min.css">
+  <style>
+    body {
+      padding-top: 60px;
+    }
+
+    .loader {
+      border: 16px solid #f3f3f3;
+      /* Light grey */
+      border-top: 16px solid #3498db;
+      /* Blue */
+      border-radius: 50%;
+      width: 30px;
+      height: 30px;
+      animation: spin 2s linear infinite;
+    }
+
+    @keyframes spin {
+      0% {
+        transform: rotate(0deg);
+      }
+      100% {
+        transform: rotate(360deg);
+      }
+    }
+  </style>
+  <script>
+    function FridgeClientController($scope, $http) {
+
+      $scope.loading = false;
+      $scope.drinkRequests = [];
+      $scope.fridge = [];
+      $scope.userName = "";
+      $scope.apiDomain = "";
+      $scope.deviceIp = "";
+      $scope.connectedTo = "";
+
+
+      let socket = io.connect(null, {
+        forceNew: true,
+        'multiplex': false
+      });
+
+
+      socket.on('connect', function () {
+        console.log('-----SOCKET CONNECTED--------')
+      });
+
+      socket.on('connectedToDevice', function () {
+        console.log('-----CONNECTED TO DEVICE HARDWARE EVENT--------')
+        $scope.connectedTo = 'CONECTED TO DEVICE: ' + $scope.deviceIp
+        $scope.loading = false;
+        $scope.$apply();
+      });
+
+      socket.on('disconnectedFromDevice', function () {
+        $scope.loading = false;
+        $scope.fridge = [];
+        $scope.connectedTo = "";
+        $scope.$apply();
+      });
+
+      socket.on('drinkAvailable', function () {
+        $scope.fridge.push('drink1')
+        $scope.$apply();
+      });
+
+      socket.on('drinkUnavailable', function () {
+        $scope.fridge.splice(0, 1);
+        $scope.$apply();
+      });
+
+
+      $scope.connectToDevice = function () {
+        $scope.loading = true
+        var completeUrl = "http://localhost:4000/connectdevice/" + $scope.deviceIp +
+          "/" + $scope.userName //and the same for input 3
+        $http({
+          method: 'GET',
+          url: completeUrl
+        }).
+        success(function (data, status, headers, config) {
+          console.log('CONECTING TO DEVICE', $scope.deviceIp, data)
+          // here data contains all informations returned by the server
+        }).
+        error(function (data, status, headers, config) {
+          console.error('ERROR CONECTING TO DEVICE API', data)
+          $scope.loading = false;
+          $scope.$apply();
+          //In case your server respond with a 4XX or 5XX error code
+        });
+
+      }
+
+
+      //FIREBASE
+
+      let ref = firebase.app().database().ref();
+      let availableDrinks = ref.child('availableDrinks');
+      let drinkRequestsRef = ref.child('requestDrinks');
+
+
+      $scope.requestDrink = function (drink) {
+        $scope.requestDrinksPush({
+            name: $scope.userName,
+            beer: 'beer',
+            quantity: 1,
+            fullfilled: false
+          })
+          .catch(function (err) {
+            console.log('error', err);
+          });
+      }
+
+      $scope.requestDrinksPush = function (drink) {
+        drink.fullfilled = false;
+        delete drink.$$hashKey
+        return new Promise(function (resolve, reject) {
+          setTimeout(function () {
+            drinkRequestsRef.push(drink)
+              .then(resolve, reject);
+          }, 1);
+        });
+      };
+
+      drinkRequestsRef.orderByKey().on('child_added', function (snap) {
+        console.log('------------DRINK REQUEST THROUGH FIREBASE------------------->', snap.val())
+        let item = snap.val()
+
+        $scope.$apply();
+      });
+
+      availableDrinks.limitToLast(1).on('child_added', function (snap) {
+        console.log('------------THERE IS A DRINK ON THE FRIDGE------------------->', snap.val())
+        $scope.connectedTo = 'CONECTED TO FIREBASE REALTIME!';
+        let item = snap.val()
+        if (item.hasDrink1) {
+          $scope.fridge = []
+          $scope.fridge.push(snap.val())
+        } else {
+          $scope.fridge = []
+        }
+        $scope.$apply();
+      });
+
+
+    }
+  </script>
+</head>
+
+<body>
+  <div class="container" ng-controller="FridgeClientController">
+    <div class="navbar navbar-fixed-top navbar-inverse">
+      <div class="navbar-inner">
+        <div class="pull-right">
+          <a href="https://c9.io" class="brand" ng-if="userName">{{ userName }} - {{ connectedTo }}</a>
+        </div>
+      </div>
+    </div>
+    <div class="page-header">
+      <h1 ng-show="connectedTo != ''">Olá, tenho {{ fridge.length }}
+        <u>fesquinhas</u> em stock!</h1>
+      <h1 ng-show="connectedTo == ''">Estou à espera de saber se há fesquinhas...faz Connect</h1>
+    </div>
+    <div class="row">
+
+      <div class="span4">
+        <ul class="nav nav-list well">
+          <li class="nav-header">Connection</li>
+          <div class="column">
+            <form name="connectionForm" ng-submit="connectToDevice()">
+              <div class="form-group">
+                <label for="username">Your name, please</label>
+                <input type="text" class="form-control" id="username" name="username" ng-model="userName" placeholder="Enter name">
+              </div>
+              <!-- <div class="form-group">
+                <label for="apidomain">API domain</label>
+                <input type="text" required class="form-control" id="apidomain" name="apidomain" ng-model="apiDomain" placeholder="Enter API URL">
+              </div> -->
+              <div class="form-group">
+                <label for="exampleInputPassword1">Device WIFI IP</label>
+                <input type="text" required ng-pattern='/^([0-9]{1,3})[.]([0-9]{1,3})[.]([0-9]{1,3})[.]([0-9]{1,3})$/' name="deviceip" class="form-control"
+                  id="deviceip" ng-model="deviceIp" placeholder="IP">
+              </div>
+              <button type="submit" ng-disabled="connectionForm.deviceip.$error.pattern" class="btn btn-primary">Connect</button>
+              <div class="loader" ng-show="loading"></div>
+            </form>
+          </div>
+          </li>
+        </ul>
+      </div>
+
+      <div class="span8">
+        <ul class="nav nav-list well">
+          <li class="nav-header">Bebidas disponiveis</li>
+          <div ng-repeat="drink in fridge">
+            <img style="width: 60%" src="https://www.winershop.com/4913-large_default/cerveja-sagres-lata-33cl.jpg"></img>
+            <button type="submit" ng-disabled="connectionForm.deviceip.$error.pattern" ng-click="requestDrink(drink)" class="btn btn-primary">Pedir fesquinha</button>
+          </div>
+          </li>
+        </ul>
+
+      </div>
+
+    </div>
+
+
+  </div>
+  </div>
+
+  <script src="https://www.gstatic.com/firebasejs/5.0.2/firebase.js"></script>
+  <script>
+    // Initialize Firebase
+    var config = {
+      apiKey: "AIzaSyCvl7kao_50zgK8iHzuB11BlKmtTPAvOxY",
+      authDomain: "j5iot-2c033.firebaseapp.com",
+      databaseURL: "https://j5iot-2c033.firebaseio.com",
+      projectId: "j5iot-2c033",
+      storageBucket: "j5iot-2c033.appspot.com",
+      messagingSenderId: "820352948500"
+    };
+    firebase.initializeApp(config);
+  </script>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/js/jquery.min.js"></script>
+  <script src="/js/bootstrap.min.js"></script>
+  <script src="/js/angular.min.js"></script>
+</body>
+
+</html>

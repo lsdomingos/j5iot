@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en" ng-app>
+
+<head>
+  <title>Frigorifico IoT Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="/css/bootstrap.min.css">
+  <link rel="stylesheet" href="/css/bootstrap-responsive.min.css">
+  <style>
+    body {
+      padding-top: 60px;
+    }
+  </style>
+  <script>
+    function FridgeController($scope, $http) {
+      let socket = io.connect(null, {
+        forceNew: true,
+        'multiplex': false
+      });
+
+      $scope.drinkRequests = [];
+      $scope.fridge = [];
+
+      let ref = firebase.app().database().ref();
+
+      //FIREBASE
+
+      let drinkRequestsRef = ref.child('requestDrinks');
+
+      drinkRequestsRef.orderByKey().on('value', function (snap) {
+
+        let item = snap.val()
+        if (!!item == false ||  typeof(item) != 'object') return
+        console.log('------------DRINK REQUEST THROUGH FIREBASE------------------->', item)
+        $scope.drinkRequests = item
+        
+        $scope.$apply();
+      });
+
+
+      $scope.requestDrinksPush = function (drink) {
+
+        return new Promise(function (resolve, reject) {
+          setTimeout(function () {
+            drinkRequestsRef.update(drink)
+              .then(resolve, reject);
+          }, 1);
+        });
+      };
+
+
+      let availableDrinksRef = ref.child('availableDrinks');
+      $scope.availableDrinksPush = function (drink) {
+        return new Promise(function (resolve, reject) {
+          setTimeout(function () {
+            availableDrinksRef.push(drink)
+              .then(resolve, reject);
+          }, 1);
+        });
+      };
+
+      //------------------USERS---------------//
+
+      socket.on('fridgeAddDrink', function (drink) {
+        console.log('---ADD DRINK----->', drink)
+        $scope.fridge.push(drink);
+
+        $scope.availableDrinksPush({
+            hasDrink1: true
+          })
+          .catch(function (err) {
+            console.log('error', err);
+          });
+
+        $scope.$apply();
+      });
+
+      socket.on('fridgeRemoveDrink', function (drink) {
+        console.log('-----REMOVE DRINK--->', drink)
+        $scope.fridge.splice(0, 1)
+
+        $scope.availableDrinksPush({
+            hasDrink1: false
+          })
+
+          .catch(function (err) {
+            console.log('error', err);
+          });
+        $scope.$apply();
+      });
+
+      socket.on('requestDrink', function (data) {
+        console.log('---------DRINK REQUEST------------>', data)
+        $scope.drinkRequests.push(JSON.parse(data));
+        $scope.$apply();
+      });
+
+      //------------------USERS---------------//
+
+      socket.on('connect', function () {
+        console.log('-----CLIENT CONNECTED--------')
+        $scope.setName();
+      });
+
+
+      $scope.setName = function setName() {
+        socket.emit('identify', $scope.name);
+      };
+
+      $scope.drinkRequesCompleted = function (drinkRequest, key) {
+        console.log('FULFILL DRINK REQUEST---------------------------->', drinkRequest)
+        $scope.drinkRequests = [];
+        // $scope.drinkRequests = $scope.drinkRequests.filter((item) => {
+        //   console.log('Complet drink request', drinkRequest, item)
+        //   return item.name = drinkRequest.name ? false : item;
+
+        // })
+        drinkRequest[key].fullfilled = true;
+        delete drinkRequest[key].$$hashKey
+        $scope.requestDrinksPush(drinkRequest[key])
+          .catch(function (err) {
+            console.log('error', err);
+          });
+      }
+
+    }
+  </script>
+</head>
+
+<body>
+  <div class="container" ng-controller="FridgeController">
+    <div class="navbar navbar-fixed-top navbar-inverse">
+      <div class="navbar-inner">
+        <div class="pull-right">
+          <a href="https://c9.io" class="brand">Luis Domingos</a>
+        </div>
+      </div>
+    </div>
+    <div class="page-header">
+      <h1>Olá, tenho {{ fridge.length }}
+        <u>fesquinhas</u> em stock!</h1>
+
+
+    </div>
+    <div class="row">
+
+      <div class="span3">
+        <ul class="nav nav-list well">
+          <li class="nav-header">Pedidos</li>
+          <div ng-repeat="(key, drinkRequest) in drinkRequests">
+            <div ng-show="!drinkRequest.fullfilled">
+              <b>{{drinkRequest.name}}</b>
+              <p>
+                <h3>Pedido:</h2>
+              </p>
+              <p>
+                <h4>{{drinkRequest.quantity}} X - {{drinkRequest.beer}}</h4>
+              </p>
+              <button ng-click="drinkRequesCompleted(drinkRequests, key)" class="btn btn-primary">Completed</button>
+            </div>
+          </div>
+          </li>
+        </ul>
+      </div>
+
+      <div class="span9">
+        <ul class="nav nav-list well">
+          <li class="nav-header">Bebidas disponiveis</li>
+          <div ng-repeat="drink in fridge">
+            <img src="https://www.winershop.com/4913-large_default/cerveja-sagres-lata-33cl.jpg"></img>
+          </div>
+          </li>
+        </ul>
+        <div class="row" ng-show="fridge.length == 0"> 
+            <div class="column span6"><h2 >Sem fesquinhas!, deseja mandar vir?</h2><button class="btn btn-primary">Encomendar</button></div>
+            
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="https://www.gstatic.com/firebasejs/5.0.2/firebase.js"></script>
+  <script>
+    // Initialize Firebase
+    var config = {
+      apiKey: "AIzaSyCvl7kao_50zgK8iHzuB11BlKmtTPAvOxY",
+      authDomain: "j5iot-2c033.firebaseapp.com",
+      databaseURL: "https://j5iot-2c033.firebaseio.com",
+      projectId: "j5iot-2c033",
+      storageBucket: "j5iot-2c033.appspot.com",
+      messagingSenderId: "820352948500"
+    };
+    firebase.initializeApp(config);
+  </script>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/js/jquery.min.js"></script>
+  <script src="/js/bootstrap.min.js"></script>
+  <script src="/js/angular.min.js"></script>
+</body>
+
+</html>
